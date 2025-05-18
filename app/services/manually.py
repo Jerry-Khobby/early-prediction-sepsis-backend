@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-#When I mean action , I mean any first add that can be taken to help the patient 
+# When I mean action, I mean any first aid that can be taken to help the patient
 class ManualPredictor:
     def __init__(self, model):
         self.model = model
@@ -132,42 +132,63 @@ class ManualPredictor:
 
         # Process categorical features
         X_cat = np.array([
-            scaler.scale_categorical(getattr(request, col), col) 
+            scaler.scale_categorical(getattr(request, col, 0), col) 
             for col in self.cat_features
         ], dtype=np.float32)
-
-        return X_cont.reshape(1, 10, 5), X_cat.reshape(1, -1)
+        X_cont = X_cont.reshape(1, 10, 5)  # Reshape for model input
+        X_cat = X_cat.reshape(1, -1)
+        if X_cat.shape[1] != len(self.cat_features):
+            logger.error(f"Expected {len(self.cat_features)} categorical features, got {X_cat.shape[1]}")
+            raise ValueError("Mismatch in number of categorical features")
+        return X_cont, X_cat
 
     def predict(self, X_cont: np.ndarray, X_cat: np.ndarray) -> Dict:
         """Run model prediction and generate clinical response"""
-        prediction = self.model.predict([X_cont, X_cat])
-        pred_prob = float(prediction[0, 1])
-        risk_level = self._determine_risk_level(pred_prob)
-        protocol = self.risk_protocols[risk_level]
-        
-        return {
-            'risk_score': pred_prob,
-            'risk_level': risk_level,
-            'time_horizon': '10-hour sepsis risk',
-            'clinical_interpretation': protocol['interpretation'],
-            'key_drivers': self._get_top_features(X_cont[0], X_cat[0]),
-            'clinical_protocol': {
-                'monitoring': protocol['monitoring'],
-                'diagnostics': protocol['diagnostics'],
-                'medications': protocol['medications'],
-                'actions': protocol['actions']
-            },
-            'antibiotic_options': self._get_antibiotic_options(risk_level),
-            'clinical_warnings': self._get_clinical_warnings(risk_level),
-            'disclaimer': 'Clinical recommendations require physician validation'
-        }
+        try:
+            # Validate inputs
+            if X_cont.shape != (1, 10, 5):
+                raise ValueError("Continuous features must have shape (1, 10, 5)")
+            if X_cat.shape[1] != len(self.cat_features):
+                raise ValueError(f"Categorical features must have {len(self.cat_features)} elements")
+                
+            prediction = self.model.predict([X_cont, X_cat])
+            pred_prob = float(prediction[0, 1])
+            risk_level = self._determine_risk_level(pred_prob)
+            protocol = self.risk_protocols[risk_level]
+            
+            return {
+                'risk_score': pred_prob,
+                'risk_level': risk_level,
+                'time_horizon': '10-hour sepsis risk',
+                'clinical_interpretation': protocol['interpretation'],
+                'key_drivers': self._get_top_features(X_cont[0], X_cat[0]),
+                'clinical_protocol': {
+                    'monitoring': protocol['monitoring'],
+                    'diagnostics': protocol['diagnostics'],
+                    'medications': protocol['medications'],
+                    'actions': protocol['actions']
+                },
+                'antibiotic_options': self._get_antibiotic_options(risk_level),
+                'clinical_warnings': self._get_clinical_warnings(risk_level),
+                'disclaimer': 'Clinical recommendations require physician validation'
+            }
+        except Exception as e:
+            logger.error(f"Prediction error: {str(e)}")
+            return {
+                'error': str(e),
+                'message': 'Failed to generate prediction'
+            }
 
     def _determine_risk_level(self, probability: float) -> str:
         """Categorize sepsis risk level"""
-        if probability < 0.3: return 'low'
-        elif probability < 0.7: return 'medium'
-        elif probability < 0.9: return 'high'
-        else: return 'critical'
+        if probability < 0.3:
+            return 'low'
+        elif probability < 0.7:
+            return 'medium'
+        elif probability < 0.9:
+            return 'high'
+        else:
+            return 'critical'
 
     def _get_top_features(self, X_cont: np.ndarray, X_cat: np.ndarray) -> List[Dict]:
         """Identify top 5 contributing features"""
@@ -176,7 +197,8 @@ class ManualPredictor:
             feat: float(np.mean(np.abs(X_cont[:, i])))
             for i, feat in enumerate(self.cont_features)
         }
-        
+        if X_cat.ndim == 1:
+            X_cat = X_cat.reshape(1, -1)
         # Categorical features importance
         cat_importance = {
             feat: float(np.abs(val))
