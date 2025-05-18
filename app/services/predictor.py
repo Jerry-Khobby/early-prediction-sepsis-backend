@@ -151,49 +151,4 @@ async def predict_from_csv(df: pd.DataFrame):
 
 
 
-    try:
-        # Extract categorical/static input
-        input_features = [getattr(request, name) for name in feature_names]
-        input_cat = np.array([input_features], dtype=np.float32)  # Shape: [1, num_features]
-
-        # Derive continuous features X_cont from input_cat (mimicking the processing logic)
-        input_cont = derive_continuous_input(input_cat)  # Derived from the request input
-        input_cont = np.expand_dims(input_cont, axis=1)  # Shape: [1, 1, embed_dim]
-
-        # Make the prediction
-        prediction = model.predict([input_cont, input_cat])  # Model expects both cont and cat inputs
-
-        # Mock label for metrics
-        mock_label = np.array([1], dtype=np.int32)
-        mock_label_cat = to_categorical(mock_label)
-
-        # Compute metrics (ROC and AUC)
-        results_df, thresh_final, AUC = roc(prediction[:, 1], mock_label_cat[:, 1], 'manual')
-        results_df = results_df.sort_values(by='fpr')
-        metrics = evaluate_model(prediction[:, 1], mock_label_cat[:, 1], threshold=thresh_final, filename='manual')
-
-        # SHAP results for explainability
-        shap_results = get_shap_importances(input_cont, input_cat, model, feature_names=feature_names)
-
-        # Generate recommendations
-        explanation = generate_llm_recommendation(AUC)
-        medication_suggestions = generate_medication_suggestions(AUC)
-
-        return {
-            "auc": float(AUC * 100),
-            "threshold": float(thresh_final),
-            "metrics": metrics,
-            "shap_values": shap_results,
-            "predictions": prediction[:, 1].tolist(),
-            "explanations": explanation,
-            "medication_suggestions": medication_suggestions,
-        }
-
-    except Exception as e:
-        raise ValueError(f"Error making manual prediction: {str(e)}")
-
-
-
-
-
 

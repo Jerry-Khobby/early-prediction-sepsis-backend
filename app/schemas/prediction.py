@@ -60,18 +60,19 @@ class PredictionRequest(BaseModel):
     
 
 
-from pydantic import  validator
-import numpy as np
 
+from typing import List
+from pydantic import BaseModel, Field, validator
+import numpy as np
 class ManualPredictionRequest(BaseModel):
-    # Time-series features (last 10 readings)
+    # Time-series features (exactly 10 values)
     HR: List[float] = Field(..., min_items=10, max_items=10)
     MAP: List[float] = Field(..., min_items=10, max_items=10)
     O2Sat: List[float] = Field(..., min_items=10, max_items=10)
     SBP: List[float] = Field(..., min_items=10, max_items=10)
     Resp: List[float] = Field(..., min_items=10, max_items=10)
     
-    # Categorical features (scalar floats)
+    # Categorical features with validation
     Unit1: float = Field(..., ge=0, le=1)
     Gender: float = Field(..., ge=0, le=1)
     HospAdmTime: float = Field(..., ge=0)
@@ -106,20 +107,21 @@ class ManualPredictionRequest(BaseModel):
     Fibrinogen: float = Field(..., gt=0)
     Bilirubin_direct: float = Field(..., ge=0)
 
-    # Handle NaNs in scalar float fields
-    @validator(
-        'Unit1', 'Gender', 'HospAdmTime', 'Age', 'DBP', 'Temp', 'Glucose',
-        'Potassium', 'Hct', 'FiO2', 'Hgb', 'pH', 'BUN', 'WBC', 'Magnesium',
-        'Creatinine', 'Platelets', 'Calcium', 'PaCO2', 'BaseExcess', 'Chloride',
-        'HCO3', 'Phosphate', 'EtCO2', 'SaO2', 'PTT', 'Lactate', 'AST',
-        'Alkalinephos', 'Bilirubin_total', 'TroponinI', 'Fibrinogen',
-        'Bilirubin_direct',
-        pre=True
-    )
-    def replace_nan_scalar(cls, v):
-        return v if v is not None and not np.isnan(v) else np.pi
+    @validator('*')
+    def check_nan(cls, v):
+        """Ensure no NaN values in any field"""
+        if isinstance(v, list):
+            if any(np.isnan(x) for x in v):
+                raise ValueError("List values cannot contain NaN")
+        elif isinstance(v, float) and np.isnan(v):
+            raise ValueError("NaN values not allowed")
+        return v
 
-    # Handle NaNs in list fields
-    @validator('HR', 'MAP', 'O2Sat', 'SBP', 'Resp', pre=True)
-    def replace_nan_list(cls, v):
-        return [x if x is not None and not np.isnan(x) else np.pi for x in v]
+    @validator('HR', 'MAP', 'O2Sat', 'SBP', 'Resp')
+    def check_time_series_values(cls, v):
+        """Validate time-series data"""
+        if any(np.isnan(x) for x in v):
+            raise ValueError("Time-series values cannot contain NaN")
+        if len(v) != 10:
+            raise ValueError("Exactly 10 values required for time-series features")
+        return v

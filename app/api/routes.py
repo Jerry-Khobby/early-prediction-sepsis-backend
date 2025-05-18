@@ -100,8 +100,7 @@ async def generate_report(prediction_results: dict):
 # routers/predict.py
 # routers/manual.py
 
-# Initialize during app startup
-predictor = ManualPredictor(model)  # model loaded during startup
+predictor = ManualPredictor(model)
 
 @router.post("/manual_predict")
 async def manual_predict(request: ManualPredictionRequest):
@@ -110,21 +109,46 @@ async def manual_predict(request: ManualPredictionRequest):
         X_cont, X_cat = predictor.preprocess(request)
         results = predictor.predict(X_cont, X_cat)
         
-        # Ensure all values are valid before creating response
-        auc_value = float(results.get("auc", 0.0) * 100) if results.get("auc") is not None else 0.0
-        threshold_value = float(results.get("threshold", 0.0)) if results.get("threshold") is not None else 0.0
-        prediction_value = float(results.get("prediction", 0.0)) if results.get("prediction") is not None else 0.0
-        
         return {
-            "auc": auc_value,
-            "threshold": threshold_value,
-            "shap_values": results.get("shap_values", {}),
-            "prediction_probability": prediction_value
+            "risk_assessment": {
+                "score": results['risk_score'],
+                "level": results['risk_level'],
+                "time_frame": results['time_horizon'],
+                "interpretation": results['clinical_interpretation']
+            },
+            "key_risk_factors": results['key_drivers'],
+            "clinical_guidance": {
+                "monitoring": results['clinical_protocol']['monitoring'],
+                "diagnostic_tests": results['clinical_protocol']['diagnostics'],
+                "treatment_options": {
+                    "immediate_medications": results['clinical_protocol']['medications'],
+                    "antibiotic_choices": results['antibiotic_options']
+                },
+                "required_actions": results['clinical_protocol']['actions']
+            },
+            "safety_alerts": results['clinical_warnings'],
+            "disclaimers": [
+                results['disclaimer'],
+                "All medication doses require validation for renal/hepatic function",
+                "Actual treatment may vary based on patient-specific factors"
+            ]
         }
         
     except ValueError as e:
         logger.warning(f"Validation error: {str(e)}")
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        logger.error(f"Prediction failed: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.error(f"Prediction failed: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Internal server error",
+                "clinical_advice": [
+                    "While system is unavailable, follow standard sepsis protocols:",
+                    "1. Obtain blood cultures",
+                    "2. Administer broad-spectrum antibiotics",
+                    "3. Initiate fluid resuscitation",
+                    "4. Contact senior clinician immediately"
+                ]
+            }
+        )
