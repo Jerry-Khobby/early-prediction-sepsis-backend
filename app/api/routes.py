@@ -5,13 +5,23 @@ from app.services.manually import ManualPredictor
 from app.services.shap_explainer import get_shap_importances
 import logging
 from io import StringIO
-
+from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import os
+import base64
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
+from pydantic import BaseModel
 import pandas as pd
-import numpy as np
 from tensorflow import keras 
 from app.core.config import MODEL_PATH
-from typing import Dict, Any
 from app.services.reporter import generate_medication_suggestions,generate_clinical_explanation
+from dotenv import load_dotenv
+load_dotenv()
+
 
 router = APIRouter()
 logging.basicConfig(level=logging.INFO)
@@ -114,7 +124,8 @@ async def manual_predict(request: ManualPredictionRequest):
                 "score": results['risk_score'],
                 "level": results['risk_level'],
                 "time_frame": results['time_horizon'],
-                "interpretation": results['clinical_interpretation']
+                "interpretation": results['clinical_interpretation'],
+                "detailed_analysis": results['clinical_analysis']
             },
             "key_risk_factors": results['key_drivers'],
             "clinical_guidance": {
@@ -152,3 +163,55 @@ async def manual_predict(request: ManualPredictionRequest):
                 ]
             }
         )
+
+
+
+
+
+
+
+class EmailRequest(BaseModel):
+    email: str
+    pdf_base64: str
+    report_name: str
+
+@router.post("/send-report")
+async def send_report(request: EmailRequest):
+    try:
+        # Email configuration from environment variables
+        email_user = os.getenv("EMAIL_USER")
+        email_password = os.getenv("EMAIL_PASSWORD")
+        email_host = os.getenv("EMAIL_HOST", "smtp.gmail.com")
+        email_port = int(os.getenv("EMAIL_PORT", 587))
+        
+        if not email_user or not email_password:
+            raise HTTPException(status_code=500, detail="Email service not configured")
+
+        # Decode the base64 PDF
+        pdf_bytes = base64.b64decode(request.pdf_base64)
+
+        # Create email message
+        msg = MIMEMultipart()
+        msg['From'] = f"MedicalAI Reports <{email_user}>"
+        msg['To'] = request.email
+        msg['Subject'] = f"Your {request.report_name} Report"
+
+        # Email body
+        body = f"Please find attached your {request.report_name} report."
+        msg.attach(MIMEText(body, 'plain'))
+
+        # Attach PDF
+        part = MIMEApplication(pdf_bytes, Name=f"{request.report_name}.pdf")
+        part['Content-Disposition'] = f'attachment; filename="{request.report_name}.pdf"'
+        msg.attach(part)
+
+        # Send email
+        with smtplib.SMTP(email_host, email_port) as server:
+            server.starttls()
+            server.login(email_user, email_password)
+            server.send_message(msg)
+
+        return {"status": "success", "message": "Email sent successfully"}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")

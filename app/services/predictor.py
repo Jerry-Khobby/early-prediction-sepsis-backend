@@ -91,6 +91,7 @@ async def predict_from_csv(df: pd.DataFrame):
         
         # Make predictions
         prediction = model.predict([X_test_cont, X_test_cat])
+        pred_probs = prediction[:, 1].tolist()
         
         # Calculate metrics
         results_df, thresh_final, AUC = roc(prediction[:, 1], y_test[:, 1], 'val')
@@ -134,7 +135,8 @@ async def predict_from_csv(df: pd.DataFrame):
                 "time_series": shap_results.get("time_series_importances", {}),
                 "categorical": shap_results.get("categorical_importances", {}),
                 "top_features": shap_results.get("top_shap_features", {})
-            }
+            },
+            "prediction_prob":pred_probs
         }
 
         return safe_jsonable_encoder(response)
