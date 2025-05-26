@@ -84,6 +84,7 @@ async def predict_from_csv(df: pd.DataFrame):
     try:
         # Process the CSV file
         X_test_cont, X_test_cat, y_test = preprocess_csv(df)
+    
         
         # Ensure consistent float32 dtype
         X_test_cont = X_test_cont.astype('float32')
@@ -92,7 +93,6 @@ async def predict_from_csv(df: pd.DataFrame):
         # Make predictions
         prediction = model.predict([X_test_cont, X_test_cat])
         pred_probs = prediction[:, 1].tolist()
-        
         # Calculate metrics
         results_df, thresh_final, AUC = roc(prediction[:, 1], y_test[:, 1], 'val')
         metrics = evaluate_model(prediction[:, 1], y_test[:, 1], thresh_final, 'val')
@@ -105,7 +105,33 @@ async def predict_from_csv(df: pd.DataFrame):
             'HCO3', 'Phosphate', 'EtCO2', 'SaO2', 'PTT', 'Lactate', 'AST',
             'Alkalinephos', 'Bilirubin_total', 'TroponinI', 'Fibrinogen', 'Bilirubin_direct'
         ]
-        
+        risk_thresholds={
+            'High':0.75,
+            'Medium':0.5,
+            'Low':0.0
+        }
+        classified_predictions=[]
+        for i, (prob) in enumerate(pred_probs[:20]):
+            if prob >= risk_thresholds['High']:
+                level=' 🟥 High'
+                urgent=True
+            elif prob>=risk_thresholds['Medium']:
+                level =' 🟨Medium'
+                urgent=False
+            else:
+                level =' 🟩 Low'
+                urgent=False
+            classified_predictions.append({
+                'patient_id': i+1,
+                'probability': float(prob),
+                'risk_level': level,
+                'needs_urgent_attention': urgent
+            })
+        risk_distribution = {
+            '🟥 High': sum(1 for p in pred_probs if p >= 0.75),
+            '🟨 Moderate': sum(1 for p in pred_probs if 0.5 <= p < 0.75),
+            '🟩 Low (<0.5)': sum(1 for p in pred_probs if p < 0.5)
+        }
         # Time-series features (adjust these to match your actual time-series features)
         time_series_feature_names = ['X_cont_1', 'X_cont_2', 'X_cont_3', 'X_cont_4', 'X_cont_5']
 
@@ -136,7 +162,8 @@ async def predict_from_csv(df: pd.DataFrame):
                 "categorical": shap_results.get("categorical_importances", {}),
                 "top_features": shap_results.get("top_shap_features", {})
             },
-            "prediction_prob":pred_probs
+            'predictions': classified_predictions,
+            'risk_distribution': risk_distribution,
         }
 
         return safe_jsonable_encoder(response)
